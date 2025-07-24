@@ -5,9 +5,10 @@ from pathlib import Path
 import pandas as pd
 import requests
 from requests.exceptions import RequestException
+from dotenv import load_dotenv
 
 
-def fetch_and_process_stations(api_key, client_id, categories="1-2", max_retries=5):
+def fetch_and_process_stations(api_key, client_id, categories="1-7", max_retries=5):
     # API configuration
     base_url = "https://apis.deutschebahn.com/db-api-marketplace/apis/station-data/v2/stations"
     headers = {
@@ -75,6 +76,7 @@ def fetch_and_process_stations(api_key, client_id, categories="1-2", max_retries
 
 if __name__ == "__main__":
     # Get API credentials from environment variables
+    load_dotenv()
     api_key = os.getenv("API_KEY")
     client_id = os.getenv("CLIENT_ID")
 
