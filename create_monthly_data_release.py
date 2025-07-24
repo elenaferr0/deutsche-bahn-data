@@ -8,12 +8,19 @@ import pandas as pd
 from tqdm import tqdm
 
 
-def get_plan_xml_rows(xml_path, alternative_station_names):
+def get_plan_xml_rows(xml_path, alternative_station_names, current_eva_df):
     tree = ET.parse(xml_path)
     root = tree.getroot()
     station = root.get("station")
     if station in alternative_station_names:
         station = alternative_station_names[station]
+
+    if not current_eva_df[current_eva_df["name"] == station].any().any():
+        raise ValueError(
+            f"Station {station} not found in current_eva_df. Please check the station name or update the EVA list."
+        )
+    latitude = current_eva_df[current_eva_df["name"] == station]["latitude"].iloc[0]
+    longitude = current_eva_df[current_eva_df["name"] == station]["longitude"].iloc[0]
 
     rows = []
     for s in root.findall("s"):
@@ -35,11 +42,14 @@ def get_plan_xml_rows(xml_path, alternative_station_names):
 
         s_id_split = s_id.split("-")
 
-        dp_ppth = s.find("dp").get("ppth") if s.find("dp") is not None else None  # departure planed path
-        if dp_ppth is None:
+        departure_planned_path = s.find("dp").get("ppth") if s.find("dp") is not None else None
+        if departure_planned_path is None:
             final_destination_station = station
         else:
-            final_destination_station = dp_ppth.split("|")[-1]
+            final_destination_station = departure_planned_path.split("|")[-1]
+
+        if final_destination_station in alternative_station_names:
+            final_destination_station = alternative_station_names[final_destination_station]
 
         rows.append(
             {
@@ -52,18 +62,20 @@ def get_plan_xml_rows(xml_path, alternative_station_names):
                 "departure_planned_time": s.find("dp").get("pt") if s.find("dp") is not None else None,
                 "train_line_ride_id": "-".join(s_id_split[:-1]),
                 "train_line_station_num": int(s_id_split[-1]),
+                "latitude": latitude,
+                "longitude": longitude,
             }
         )
     return rows
 
 
-def get_plan_db(date_folders, alternative_station_names):
+def get_plan_db(date_folders, alternative_station_names, current_eva_df):
     rows = []
 
     for date_folder_path in tqdm(date_folders, desc="Processing plan files"):
         for xml_path in sorted(date_folder_path.iterdir()):
             if "plan" in xml_path.name:
-                rows.extend(get_plan_xml_rows(xml_path, alternative_station_names))
+                rows.extend(get_plan_xml_rows(xml_path, alternative_station_names, current_eva_df))
 
     out_df = pd.DataFrame(rows)
     out_df["arrival_planned_time"] = pd.to_datetime(
@@ -130,6 +142,11 @@ def main(month_year):
     with alternative_station_name_json.open("r") as f:
         alternative_station_names = json.load(f)
 
+    current_eva_list = Path("monthly_data_releases") / "current_eva_list.csv"
+
+    with current_eva_list.open("r") as f:
+        current_eva_df = pd.read_csv(f, dtype={"longitude": float, "latitude": float})
+
     current_month = datetime.strptime(month_year, "%Y-%m")
     prev_month_last_day = (current_month - pd.DateOffset(days=1)).strftime("%Y-%m-%d")
     next_month_first_day = (current_month + pd.DateOffset(months=1)).strftime("%Y-%m-%d")
@@ -141,7 +158,7 @@ def main(month_year):
     date_folders.append(data_dir / next_month_first_day)
     date_folders = [f for f in date_folders if f.is_dir()]
 
-    plan_df = get_plan_db(date_folders, alternative_station_names)
+    plan_df = get_plan_db(date_folders, alternative_station_names, current_eva_df)
     fchg_df = get_fchg_db(date_folders)
     df = pd.merge(plan_df, fchg_df, on="id", how="left")
 
@@ -211,17 +228,18 @@ def main(month_year):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        month_year = sys.argv[1]
-        try:
-            datetime.strptime(month_year, "%Y-%m")
-        except ValueError:
-            print("Error: Invalid month format. Please use YYYY-MM")
-            sys.exit(1)
-    else:
-        current_date = datetime.now()
-        last_month = current_date.replace(day=1) - pd.DateOffset(days=1)
-        month_year = last_month.strftime("%Y-%m")
-        print(f"No month year provided, using last month: {month_year}")
-
+    # if len(sys.argv) > 1:
+    #     month_year = sys.argv[1]
+    #     try:
+    #         datetime.strptime(month_year, "%Y-%m")
+    #     except ValueError:
+    #         print("Error: Invalid month format. Please use YYYY-MM")
+    #         sys.exit(1)
+    # else:
+    #     current_date = datetime.now()
+    #     last_month = current_date.replace(day=1) - pd.DateOffset(days=1)
+    #     month_year = last_month.strftime("%Y-%m")
+    #     print(f"No month year provided, using last month: {month_year}")
+    #
+    month_year = "2025-01"
     main(month_year)
